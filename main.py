@@ -1,55 +1,68 @@
 from contextlib import asynccontextmanager
+from typing import Any
 
-import pandas as pd
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 
 from market_manager import manager
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: nothing to do (servers created on-demand)
-    yield
-    # Shutdown
-    await manager.stop_all()
+    await manager.initialize_all_servers()
+    try:
+        yield
+    finally:
+        await manager.stop_all()
 
 
 app = FastAPI(lifespan=lifespan)
 
 
 @app.get("/history")
-async def get_history(symbol: str = Query(..., description="e.g. ^GSPC")):
-    server = await manager.get_server(symbol)
-    if server.data is None:
-        return JSONResponse(
-            status_code=503, content={"error": "Historical data not ready"}
+async def get_history(
+    symbol: str = Query(..., description="e.g. ^GSPC"),
+) -> list[dict[str, Any]]:
+    try:
+        server = await manager.get_server(symbol)
+    except KeyError:
+        raise HTTPException(
+            status_code=404, detail=f"Symbol '{symbol}' not configured or loaded"
         )
 
-    df = server.data.copy()
-    # Ensure it's a DataFrame with 'Close' column
-    if isinstance(df, pd.Series):
-        df = df.to_frame(name="Close")
+    if server.data is None:
+        raise HTTPException(status_code=503, detail="Historical data not ready")
 
-    df = df.reset_index()
-    df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
-    return df.to_dict(orient="records")
+    df = server.data
+    result_df = df.copy()
+
+    # Format the date index to string in the desired format
+    result_df.index = result_df.index.strftime("%Y-%m-%d")
+
+    # Convert to list of dicts
+    return result_df.to_dict(orient="records")
 
 
 @app.websocket("/live")
-async def websocket_live(websocket: WebSocket, symbol: str = Query(...)):
+async def websocket_live(websocket: WebSocket, symbol: str = Query(...)) -> None:
     await websocket.accept()
 
-    server = await manager.get_server(symbol)
+    try:
+        server = await manager.get_server(symbol)
+    except KeyError:
+        await websocket.close(code=4004, reason=f"Symbol '{symbol}' not available")
+        return
+
     server._ws_subscribers.add(websocket)
 
     try:
-        # Keep connection alive; ignore messages (or implement ping/pong)
+        # Keep the connection alive; ignore client messages
         while True:
-            await websocket.receive_text()
+            # Use receive() instead of receive_text() to handle pings automatically
+            await websocket.receive()
     except WebSocketDisconnect:
         pass
     except Exception:
+        # Log here in production (e.g., logger.exception("WS error"))
         pass
     finally:
         server._ws_subscribers.discard(websocket)

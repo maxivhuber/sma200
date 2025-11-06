@@ -1,3 +1,7 @@
 {
-    "datadir": "./data"
+    "datadir": "./data",
+    "symbols": [
+        "^GSPC",
+        "^NDX"
+    ]
 }

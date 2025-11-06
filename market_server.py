@@ -3,6 +3,7 @@ import json
 import shutil
 from datetime import date, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING  # Only import WebSocket during type checking
 
 import pandas as pd
 import pandas_market_calendars as mcal
@@ -10,6 +11,9 @@ import pandas_market_calendars as mcal
 from config import logger
 from sma200.data import get_interday_data, get_intraday_datapoint
 from sma200.utils import EASTERN, is_trading_day, market_is_open
+
+if TYPE_CHECKING:
+    from fastapi import WebSocket  # Avoid runtime import
 
 
 class MarketServer:
@@ -23,7 +27,7 @@ class MarketServer:
         self.current_day: date | None = None
         self._running = False
         self._task: asyncio.Task | None = None
-        self._ws_subscribers: set = set()  # WebSocket clients
+        self._ws_subscribers: set["WebSocket"] = set()  # Typed set
 
     def _get_csv_path(self) -> Path:
         safe_symbol = self.symbol.replace("^", "")
@@ -60,7 +64,11 @@ class MarketServer:
         try:
             next_day = valid_days[valid_days.get_loc(prev_ts) + 1].date()
             return next_day == current_day
-        except (IndexError, KeyError):
+        except IndexError:
+            # No next trading day (e.g., last in range)
+            return False
+        except KeyError:
+            # Timestamp not in valid days
             return False
 
     async def _check_new_trading_day(self):
@@ -78,38 +86,48 @@ class MarketServer:
             self.current_day = now
 
     async def _fetch_intraday_update(self):
+        """Fetch one new minute-level update and append it to in-memory + persisted data."""
         if not market_is_open():
             return
-        close_value, timestamp = get_intraday_datapoint(self.symbol)
-        if close_value is None or timestamp is None:
+
+        ohlcv, timestamp = get_intraday_datapoint(self.symbol)
+        if ohlcv is None or timestamp is None:
             return
 
+        # Convert timestamp to desired timezone
         timestamp = pd.Timestamp(timestamp).tz_convert(EASTERN)
         trading_day = timestamp.date()
         day_ts = pd.Timestamp(trading_day)
 
+        close_value = ohlcv["Close"]
         logger.info(f"[{self.symbol}] Intraday: {timestamp} → {close_value}")
 
         if self.data is None:
             logger.warning(f"[{self.symbol}] Data not loaded; skipping update")
             return
 
+        # Prepare the row as a DataFrame (so it fits your data structure cleanly)
+        new_row = pd.DataFrame([ohlcv.values], index=[day_ts], columns=ohlcv.index)
+
+        # If this index already exists, overwrite; else append
         if day_ts in self.data.index:
-            self.data.loc[day_ts] = close_value
+            self.data.loc[day_ts] = ohlcv.values
         else:
             logger.info(f"[{self.symbol}] Adding new row for {trading_day}")
-            self.data.loc[day_ts] = close_value
+            self.data = pd.concat([self.data, new_row])
 
         self.data = self.data.sort_index()
-        self._get_csv_path().write_text(self.data.to_csv())
 
-        # Push to WebSocket subscribers
+        # Persist updated data
+        csv_path = self._get_csv_path()
+        self.data.to_csv(csv_path)
+
+        # Notify WebSocket subscribers with payload
         payload = json.dumps(
             {
                 "symbol": self.symbol,
-                "price": close_value,
                 "timestamp": timestamp.isoformat(),
-                "trading_day": trading_day.isoformat(),
+                "ohlcv": ohlcv.to_dict(),
             }
         )
         disconnected = set()
