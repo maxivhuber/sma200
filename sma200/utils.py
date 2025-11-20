@@ -1,9 +1,9 @@
 from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pandas_market_calendars as mcal
-import pytz
 
-EASTERN = pytz.timezone("US/Eastern")
+EASTERN = ZoneInfo("America/New_York")
 NYSE = mcal.get_calendar("NYSE")
 
 

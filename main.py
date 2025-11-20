@@ -8,6 +8,7 @@ from market_manager import manager
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Manage application lifespan by initializing and stopping all servers."""
     await manager.initialize_all_servers()
     try:
         yield
@@ -22,28 +23,27 @@ app = FastAPI(lifespan=lifespan)
 async def get_history(
     symbol: str = Query(..., description="e.g. ^GSPC"),
 ) -> list[dict[str, Any]]:
+    """Return historical market data for the given symbol as a list of records."""
     try:
         server = await manager.get_server(symbol)
-    except KeyError:
+    except KeyError as exc:
         raise HTTPException(
-            status_code=404, detail=f"Symbol '{symbol}' not configured or loaded"
-        )
+            status_code=404,
+            detail=f"Symbol '{symbol}' not configured or loaded",
+        ) from exc
 
     if server.data is None:
         raise HTTPException(status_code=503, detail="Historical data not ready")
 
-    df = server.data
-    result_df = df.copy()
-
-    # Format the date index to string in the desired format
-    result_df.index = result_df.index.strftime("%Y-%m-%d")
-
-    # Convert to list of dicts
-    return result_df.to_dict(orient="records")
+    df = server.data.copy()
+    df.index = df.index.strftime("%Y-%m-%d")  # Format index
+    return df.to_dict(orient="records")
 
 
 @app.websocket("/live")
 async def websocket_live(websocket: WebSocket, symbol: str = Query(...)) -> None:
+    """Provide a live data websocket stream for the requested symbol."""
+    pool_name = "live"
     await websocket.accept()
 
     try:
@@ -52,17 +52,11 @@ async def websocket_live(websocket: WebSocket, symbol: str = Query(...)) -> None
         await websocket.close(code=4004, reason=f"Symbol '{symbol}' not available")
         return
 
-    server._ws_subscribers.add(websocket)
-
+    server.register_websocket(pool_name, websocket)
     try:
-        # Keep the connection alive; ignore client messages
         while True:
-            # Use receive() instead of receive_text() to handle pings automatically
-            await websocket.receive()
-    except WebSocketDisconnect:
-        pass
-    except Exception:
-        # Log here in production (e.g., logger.exception("WS error"))
+            await websocket.receive()  # keep the connection alive
+    except (WebSocketDisconnect, Exception):
         pass
     finally:
-        server._ws_subscribers.discard(websocket)
+        server.unregister_websocket(pool_name, websocket)

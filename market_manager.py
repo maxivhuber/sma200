@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pathlib import Path
 
 from config import config
@@ -5,24 +7,33 @@ from market_server import MarketServer
 
 
 class MarketManager:
+    """Manages initialization, retrieval, and shutdown of MarketServer instances."""
+
     def __init__(self) -> None:
-        self.data_dir: Path = Path(config["datadir"])
-        self.symbols_to_preload: list[str] = config.get("symbols", [])
-        self.servers: dict[str, MarketServer] = {}
+        self._data_dir: Path = Path(config["datadir"])
+        self._symbols_to_preload: list[str] = config.get("symbols", [])
+        self._servers: dict[str, MarketServer] = {}
+
+    async def _create_server(self, symbol: str) -> MarketServer:
+        """Create and start a MarketServer for the given symbol."""
+        server = MarketServer(symbol, self._data_dir)
+        server.start()
+        self._servers[symbol] = server
+        return server
 
     async def initialize_all_servers(self) -> None:
-        """Initialize all servers at startup"""
-        for symbol in self.symbols_to_preload:
-            if symbol not in self.servers:
-                server = MarketServer(symbol, self.data_dir)
-                server.start()
-                self.servers[symbol] = server
+        """Initialize all configured servers at startup."""
+        for symbol in self._symbols_to_preload:
+            if symbol not in self._servers:
+                await self._create_server(symbol)
 
     async def get_server(self, symbol: str) -> MarketServer:
-        return self.servers[symbol]
+        """Return the MarketServer associated with the given symbol."""
+        return self._servers[symbol]
 
     async def stop_all(self) -> None:
-        for server in self.servers.values():
+        """Stop all active servers cleanly."""
+        for server in self._servers.values():
             await server.stop()
 
 
