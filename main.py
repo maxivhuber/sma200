@@ -41,10 +41,9 @@ async def get_history(
 
 
 @app.websocket("/live")
-async def websocket_live(websocket: WebSocket, symbol: str = Query(...)) -> None:
+async def intraday_data_ws(websocket: WebSocket, symbol: str = Query(...)) -> None:
     """Provide a live data websocket stream for the requested symbol."""
     pool_name = "live"
-    await websocket.accept()
 
     try:
         server = await manager.get_server(symbol)
@@ -52,10 +51,47 @@ async def websocket_live(websocket: WebSocket, symbol: str = Query(...)) -> None
         await websocket.close(code=4004, reason=f"Symbol '{symbol}' not available")
         return
 
+    await websocket.accept()
     server.register_websocket(pool_name, websocket)
+
     try:
         while True:
-            await websocket.receive()  # keep the connection alive
+            await websocket.receive()  # Keep connection alive
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        server.unregister_websocket(pool_name, websocket)
+
+
+@app.websocket("/analytics/{strat}/ws")
+async def analytics_ws(
+    websocket: WebSocket,
+    strat: str,
+    symbol: str = Query(..., description="e.g. ^GSPC"),
+) -> None:
+    """Provide analytics data for a given symbol and strategy via WebSocket."""
+    pool_name = f"analytics-{strat}"
+
+    try:
+        server = await manager.get_server(symbol)
+    except KeyError:
+        await websocket.close(
+            code=4004, reason=f"Symbol '{symbol}' not configured or loaded"
+        )
+        return
+
+    if not server.analytics.exists(strat):
+        await websocket.close(
+            code=4004, reason=f"Strategy '{strat}' not configured or loaded"
+        )
+        return
+
+    await websocket.accept()
+    server.register_websocket(pool_name, websocket)
+
+    try:
+        while True:
+            await websocket.receive()  # Keep connection alive
     except (WebSocketDisconnect, Exception):
         pass
     finally:

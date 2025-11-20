@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from config import config
 from market_server import MarketServer
 
@@ -10,13 +8,12 @@ class MarketManager:
     """Manages initialization, retrieval, and shutdown of MarketServer instances."""
 
     def __init__(self) -> None:
-        self._data_dir: Path = Path(config["datadir"])
         self._symbols_to_preload: list[str] = config.get("symbols", [])
         self._servers: dict[str, MarketServer] = {}
 
     async def _create_server(self, symbol: str) -> MarketServer:
         """Create and start a MarketServer for the given symbol."""
-        server = MarketServer(symbol, self._data_dir)
+        server = MarketServer(symbol, config)
         server.start()
         self._servers[symbol] = server
         return server

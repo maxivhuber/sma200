@@ -3,5 +3,10 @@
     "symbols": [
         "^GSPC",
         "^NDX"
-    ]
+    ],
+    "sma": {
+        "window": 200,
+        "upper_threshold": 1.05,
+        "lower_threshold": 0.95
+    }
 }
