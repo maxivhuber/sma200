@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -15,6 +15,7 @@ from sma200.io import (
     load_interday_data,
     save_interday_data,
 )
+from sma200.notifications import Notifier
 from sma200.utils import (
     EASTERN,
     is_consecutive_trading_day,
@@ -39,6 +40,7 @@ class MarketServer:
         self._ws_pools: dict[str, set[WebSocket]] = {}
 
         self.analytics = Analytics(config)
+        self.notifier = Notifier(config["mailing_list"], cooldown=timedelta(hours=2))
 
     # WebSocket Management
     def register_websocket(self, pool_name: str, ws: WebSocket) -> None:
@@ -213,13 +215,28 @@ class MarketServer:
                 continue
 
             try:
-                result = self.analytics.execute(strategy, self.data)
+                result, notification = self.analytics.execute(
+                    strategy, self.data, self.symbol
+                )
+
+                if notification:
+                    registered = self.notifier.register(notification)
+                    if registered:
+                        logger.info(
+                            f"[{self.symbol}] Notification sent: {notification}"
+                        )
+                    else:
+                        logger.debug(
+                            f"[{self.symbol}] Notification suppressed (cooldown): {notification}"
+                        )
+
             except Exception as exc:
                 logger.exception(
                     f"[{self.symbol}] Error in '{strategy}' analytics: {exc}"
                 )
                 continue
 
+            # Send analytics data via WebSocket
             payload = json.dumps(
                 {
                     "symbol": self.symbol,

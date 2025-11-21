@@ -4,6 +4,9 @@
         "^GSPC",
         "^NDX"
     ],
+    "mailing_list": [
+        "my@email.com"
+    ],
     "sma": {
         "window": 200,
         "upper_threshold": 1.05,

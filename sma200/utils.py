@@ -5,6 +5,7 @@ import pandas as pd
 import pandas_market_calendars as mcal
 
 EASTERN = ZoneInfo("America/New_York")
+UTC = ZoneInfo("UTC")
 NYSE = mcal.get_calendar("NYSE")
 
 
