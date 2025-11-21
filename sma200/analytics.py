@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 from sma200.notifications import Notification
@@ -12,6 +11,7 @@ class Analytics:
     def __init__(self, config: dict):
         self.config = config
         self._registry = {"sma": self.sma_with_threshold}
+        # self._registry = {"dummy": self.dummy_strategy}
 
     def register(self, name: str, fn) -> None:
         self._registry[name] = fn
@@ -31,6 +31,31 @@ class Analytics:
     def execute(self, name: str, df, symbol: str):
         return self.get(name)(df, symbol)
 
+    # def dummy_strategy(
+    #     self, df: pd.DataFrame, symbol: str
+    # ) -> Tuple[dict, Optional[Notification]]:
+    #     random_label = random.choice(["A", "B"])
+    #     # Create notification with random label
+    #     message = f"Dummy strategy notification for {symbol} with label {random_label}"
+    #     notification = Notification(
+    #         strategy="dummy_strategy",
+    #         label=random_label,
+    #         timestamp=datetime.now(UTC),
+    #         message=message,
+    #     )
+
+    #     result = {
+    #         "type": "dummy_strategy",
+    #         "params": {},
+    #         "time_series": {
+    #             "dates": [],
+    #             "prices": [],
+    #             "signal": [],
+    #         },
+    #     }
+
+    #     return result, notification
+
     def sma_with_threshold(
         self, df: pd.DataFrame, symbol: str
     ) -> Tuple[dict, Optional[Notification]]:
@@ -38,29 +63,41 @@ class Analytics:
         window = params["window"]
         upper_threshold = params["upper_threshold"]
         lower_threshold = params["lower_threshold"]
+
+        # Compute SMA with pandas
         sma = df["Adj Close"].rolling(window=window).mean()
         valid_mask = sma.notna()
-        prices = df.loc[valid_mask, "Adj Close"].to_numpy()
-        sma_values = sma[valid_mask].to_numpy()
-        dates = sma.index[valid_mask].to_numpy()
-        upper_band = sma_values * upper_threshold
-        lower_band = sma_values * lower_threshold
-        signals = np.full(sma_values.shape, "HOLD", dtype=object)
+        df_valid = df.loc[valid_mask].copy()
+        df_valid["sma"] = sma[valid_mask]
+        df_valid["upper_band"] = df_valid["sma"] * upper_threshold
+        df_valid["lower_band"] = df_valid["sma"] * lower_threshold
+
+        prices = df_valid["Adj Close"].tolist()
+        sma_values = df_valid["sma"].tolist()
+        upper_band = df_valid["upper_band"].tolist()
+        lower_band = df_valid["lower_band"].tolist()
+        dates = [d.isoformat() for d in df_valid.index]
+
+        # Generate signals
+        signals = []
         invested = False
-        for i, price in enumerate(prices):
-            if not invested and price >= upper_band[i]:
-                signals[i] = "BUY"
+        for price, up, low in zip(prices, upper_band, lower_band):
+            if not invested and price >= up:
+                signals.append("BUY")
                 invested = True
-            elif invested and price < lower_band[i]:
-                signals[i] = "SELL"
+            elif invested and price < low:
+                signals.append("SELL")
                 invested = False
-            # otherwise HOLD
-        # Notification
+            else:
+                signals.append("HOLD")
+
+        # Notifications (same logic)
         last_signal = signals[-1]
         last_price = float(prices[-1])
         last_sma = float(sma_values[-1])
         last_upper = float(upper_band[-1])
         last_lower = float(lower_band[-1])
+
         notification: Optional[Notification] = None
         if last_signal == "BUY":
             message = (
@@ -88,15 +125,18 @@ class Analytics:
                 timestamp=datetime.now(UTC),
                 message=message,
             )
+
         result = {
             "type": "sma_with_threshold",
             "params": params,
             "time_series": {
                 "dates": dates,
+                "prices": prices,
                 "sma": sma_values,
                 "upper_band": upper_band,
                 "lower_band": lower_band,
                 "signal": signals,
             },
         }
+
         return result, notification

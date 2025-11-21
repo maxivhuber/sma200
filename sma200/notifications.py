@@ -43,7 +43,7 @@ class Notifier:
         if last_same and (now - last_same.timestamp) < self.cooldown:
             return False
 
-        # Append new notification and keep only the last 2 (for potential debugging/history)
+        # Append new notification and keep only the last 2
         label_bucket.append(notification)
         self.notifications[strategy][label] = label_bucket[-2:]
 

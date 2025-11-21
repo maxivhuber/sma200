@@ -162,7 +162,7 @@ class MarketServer:
         prev_day_data = self.data[self.data.index.date < today]
 
         ohlcv_row, timestamp = get_intraday_datapoint(self.symbol, prev_day_data)
-        if not ohlcv_row or not timestamp:
+        if ohlcv_row is None or ohlcv_row.empty or not timestamp:
             return
 
         timestamp = pd.Timestamp(timestamp).tz_convert(EASTERN)
