@@ -8,7 +8,7 @@ from fastapi import WebSocket
 
 from config import logger
 from sma200.analytics import Analytics
-from sma200.data import get_intraday_datapoint
+from sma200.data import get_interday_data, get_intraday_datapoint
 from sma200.io import (
     archive_csv,
     get_symbol_csv_path,
@@ -40,8 +40,7 @@ class MarketServer:
 
         self.analytics = Analytics(config)
 
-    # -------------------------- WebSocket Management --------------------------
-
+    # WebSocket Management
     def register_websocket(self, pool_name: str, ws: WebSocket) -> None:
         """Register a WebSocket connection under a named pool."""
         self._ws_pools.setdefault(pool_name, set()).add(ws)
@@ -68,8 +67,7 @@ class MarketServer:
         except Exception:
             return False
 
-    # -------------------------- Lifecycle Control -----------------------------
-
+    # Lifecycle Control
     async def startup(self) -> None:
         """Load initial interday market data."""
         logger.info(f"[{self.symbol}] Loading interday data...")
@@ -101,7 +99,21 @@ class MarketServer:
 
         logger.info(f"[{self.symbol}] Server stopped.")
 
-    # -------------------------- File / Data Utilities -------------------------
+    async def _run_loop(self) -> None:
+        """Main event loop: check day transitions and push intraday updates."""
+        await self.startup()
+        logger.info(f"[{self.symbol}] Entering main loop...")
+
+        while self._running:
+            try:
+                await self._check_new_trading_day()
+                await self._fetch_intraday_update()
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.exception(f"[{self.symbol}] Error in loop: {exc}")
+                await asyncio.sleep(60)
 
     def _get_csv_path(self) -> Path:
         """Return the canonical CSV file path for this symbol."""
@@ -118,8 +130,6 @@ class MarketServer:
         archive_csv(self.data_dir, self.symbol, self.stale_dir)
         logger.info(f"[{self.symbol}] Archived CSV for symbol")
 
-    # -------------------------- Trading Day Logic -----------------------------
-
     async def _check_new_trading_day(self) -> None:
         """Detect the transition to a new trading day and reload interday data."""
         today = datetime.now(EASTERN).date()
@@ -135,10 +145,8 @@ class MarketServer:
             logger.warning(f"[{self.symbol}] Gap detected — refreshing data")
             self._archive_current_csv()
 
-        self.data = load_interday_data(self.symbol, self.data_dir)
+        self.data = get_interday_data(self.symbol, self.data_dir)
         self.current_day = today
-
-    # -------------------------- Intraday Updates ------------------------------
 
     async def _fetch_intraday_update(self, pool_name: str = "live") -> None:
         """Fetch one new minute-level datapoint, update memory + disk, and broadcast."""
@@ -157,6 +165,7 @@ class MarketServer:
 
         timestamp = pd.Timestamp(timestamp).tz_convert(EASTERN)
         trading_day_ts = pd.Timestamp(timestamp.date())
+        logger.info(f"[{self.symbol}] Intraday: {timestamp} → {ohlcv_row['Adj Close']}")
 
         self._update_intraday_data(trading_day_ts, ohlcv_row)
         self._persist_data_to_csv()
@@ -179,8 +188,7 @@ class MarketServer:
         """Save current data state to CSV."""
         save_interday_data(self.data, self.symbol, self.data_dir)
 
-    # -------------------------- Broadcasting ----------------------------------
-
+    # Broadcasting
     async def _broadcast_intraday_update(
         self, pool_name: str, timestamp: pd.Timestamp, ohlcv_row: pd.Series
     ) -> None:
@@ -222,21 +230,3 @@ class MarketServer:
                 default=str,
             )
             await self.push_update(pool_name, payload)
-
-    # -------------------------- Main Loop -------------------------------------
-
-    async def _run_loop(self) -> None:
-        """Main event loop: check day transitions and push intraday updates."""
-        await self.startup()
-        logger.info(f"[{self.symbol}] Entering main loop...")
-
-        while self._running:
-            try:
-                await self._check_new_trading_day()
-                await self._fetch_intraday_update()
-                await asyncio.sleep(60)
-            except asyncio.CancelledError:
-                break
-            except Exception as exc:
-                logger.exception(f"[{self.symbol}] Error in loop: {exc}")
-                await asyncio.sleep(60)

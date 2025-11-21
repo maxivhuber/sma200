@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from .utils import EASTERN, sanitize_symbol
+from .utils import sanitize_symbol
 
 
 def get_symbol_csv_path(data_dir: Path, symbol: str) -> Path:
@@ -29,7 +29,6 @@ def load_interday_data(symbol: str, data_dir: Path) -> pd.DataFrame | None:
             "volume": "float64",
         },
     )
-    df.index = df.index.tz_localize("UTC").tz_convert(EASTERN)
     return df
 
 

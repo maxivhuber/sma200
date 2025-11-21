@@ -1,0 +1,15 @@
+services:
+  sma200-backend:
+    container_name: "sma200-backend"
+    build: .
+    labels:
+      - "com.centurylinklabs.watchtower.enable=false"
+    networks:
+      - services-net
+    volumes:
+      - ./config/msmtprc:/etc/msmtprc:ro
+    restart: unless-stopped
+
+networks:
+  services-net:
+    external: true

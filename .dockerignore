@@ -1,0 +1,28 @@
+# Python bytecode and cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Log files
+*.log
+
+# data
+data/
+
+# Jupyter Notebook (usually not needed in production containers)
+test.ipynb
+
+# Dependency lock files (optional – keep if you want reproducible builds)
+# uv.lock
+
+# Version control and IDE files
+.git
+.gitignore
+*.swp
+.DS_Store
+.vscode/
+.idea/
+
+# Docker/compose files (not needed inside the container itself)
+docker-compose.yml

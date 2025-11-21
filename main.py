@@ -37,6 +37,7 @@ async def get_history(
 
     df = server.data.copy()
     df.index = df.index.strftime("%Y-%m-%d")  # Format index
+    df = df.reset_index()
     return df.to_dict(orient="records")
 
 
