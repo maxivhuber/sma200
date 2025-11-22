@@ -51,3 +51,16 @@ def is_consecutive_trading_day(prev_day: date, current_day: date) -> bool:
 def sanitize_symbol(symbol: str) -> str:
     """Remove unsafe characters (e.g., '^') for filesystem use."""
     return symbol.replace("^", "")
+
+
+def format_analytics_payload(
+    symbol: str, strategy: str, result: dict, market_open: bool
+) -> dict:
+    """Unified payload structure for analytics REST and WS outputs."""
+    return {
+        "symbol": symbol,
+        "strategy": strategy,
+        "timestamp": datetime.utcnow().isoformat(),
+        "market_open": market_open,
+        "result": result,
+    }

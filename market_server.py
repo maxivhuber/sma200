@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -18,6 +18,7 @@ from sma200.io import (
 from sma200.notifications import Notifier
 from sma200.utils import (
     EASTERN,
+    format_analytics_payload,
     is_consecutive_trading_day,
     is_trading_day,
     market_is_open,
@@ -40,7 +41,7 @@ class MarketServer:
         self._ws_pools: dict[str, set[WebSocket]] = {}
 
         self.analytics = Analytics(config)
-        self.notifier = Notifier(config["mailing_list"], cooldown=timedelta(hours=2))
+        self.notifier = Notifier(config["mailing_list"])
 
     # WebSocket Management
     def register_websocket(self, pool_name: str, ws: WebSocket) -> None:
@@ -205,7 +206,6 @@ class MarketServer:
         await self.push_update(pool_name, payload)
 
     async def _broadcast_analytics_updates(self, timestamp: pd.Timestamp) -> None:
-        """Execute and broadcast analytics results to corresponding WebSocket pools."""
         for pool_name in self._ws_pools:
             if not pool_name.startswith("analytics-"):
                 continue
@@ -216,7 +216,7 @@ class MarketServer:
 
             try:
                 result, notification = self.analytics.execute(
-                    strategy, self.data, self.symbol
+                    strategy, self.data, self.symbol, True
                 )
 
                 if notification:
@@ -229,21 +229,16 @@ class MarketServer:
                         logger.debug(
                             f"[{self.symbol}] Notification suppressed (cooldown): {notification}"
                         )
-
             except Exception as exc:
                 logger.exception(
                     f"[{self.symbol}] Error in '{strategy}' analytics: {exc}"
                 )
                 continue
 
-            # Send analytics data via WebSocket
             payload = json.dumps(
-                {
-                    "symbol": self.symbol,
-                    "timestamp": timestamp.isoformat(),
-                    "strategy": strategy,
-                    "result": result,
-                },
+                format_analytics_payload(
+                    self.symbol, strategy, result, market_open=False
+                ),
                 default=str,
             )
             await self.push_update(pool_name, payload)
