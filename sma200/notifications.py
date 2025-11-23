@@ -35,13 +35,17 @@ class Notification:
 class Notifier:
     """Registers and dispatches notifications with per-label cooldown enforcement."""
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict, symbol: str) -> None:
         self.mailing_list: List[str] = config["mailing_list"]
+        self.symbol = symbol
 
         datadir = Path(config.get("notifications", "."))
         datadir.mkdir(parents=True, exist_ok=True)
 
-        self.SHELVE_PATH = datadir / "notifier_state"
+        symbol_dir = datadir / symbol
+        symbol_dir.mkdir(parents=True, exist_ok=True)
+
+        self.SHELVE_PATH = symbol_dir / "notifier_state"
         self._db = shelve.open(str(self.SHELVE_PATH), writeback=True)
 
         if "notifications" not in self._db:

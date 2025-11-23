@@ -16,30 +16,37 @@ class BaseStrategy:
         self.cooldowns = self._parse_cooldowns(self.config.get("cooldowns", {}))
 
     @staticmethod
-    def _parse_cooldowns(cooldown_cfg: Dict[str, str]) -> Dict[str, timedelta]:
+    def _parse_cooldowns(cooldown_cfg: Dict[str, Any]) -> Dict[str, timedelta]:
         """Parse cooldown strings like {'BUY': '2 hours'} into timedeltas."""
         cooldowns: Dict[str, timedelta] = {}
-        for label, text in cooldown_cfg.items():
-            parts = text.split()
-            if len(parts) != 2:
-                raise ValueError(f"Invalid cooldown format: {text!r}")
-
-            num_str, unit = parts
-            try:
-                num = int(num_str)
-            except ValueError as exc:
-                raise ValueError(f"Invalid number in cooldown: {text!r}") from exc
-
-            if "hour" in unit:
-                cooldowns[label] = timedelta(hours=num)
-            elif "minute" in unit:
-                cooldowns[label] = timedelta(minutes=num)
-            elif "day" in unit:
-                cooldowns[label] = timedelta(days=num)
+        for label, value in cooldown_cfg.items():
+            if isinstance(value, dict):
+                nested = BaseStrategy._parse_cooldowns(value)
+                for sub_label, td in nested.items():
+                    cooldowns[f"{label}_{sub_label}"] = td
             else:
-                raise ValueError(f"Unsupported cooldown unit: {unit!r}")
-
+                cooldowns[label] = BaseStrategy.parse_cooldown(value)
         return cooldowns
+
+    @staticmethod
+    def parse_cooldown(text: str) -> timedelta:
+        """Parse a single cooldown string like '2 hours' into a timedelta."""
+        parts = text.split()
+        if len(parts) != 2:
+            raise ValueError(f"Invalid cooldown format: {text!r}")
+        num_str, unit = parts
+        try:
+            num = float(num_str)
+        except ValueError as exc:
+            raise ValueError(f"Invalid number in cooldown: {text!r}") from exc
+        if "hour" in unit:
+            return timedelta(hours=num)
+        elif "minute" in unit:
+            return timedelta(minutes=num)
+        elif "day" in unit:
+            return timedelta(days=num)
+        else:
+            raise ValueError(f"Unsupported cooldown unit: {unit!r}")
 
     def cooldown_for_label(self, label: str) -> timedelta:
         """Return configured timedelta for label, or a 1-hour default."""
@@ -134,7 +141,6 @@ class SMAWithThresholdStrategy(BaseStrategy):
                 "signal": signals,
             },
         }
-
         if streaming_update and len(dates) > 0:
             idx = -1
             return {
@@ -149,14 +155,12 @@ class SMAWithThresholdStrategy(BaseStrategy):
                     "signal": signals[idx],
                 },
             }
-
         return result
 
     def generate_notifications(
         self, result: Dict[str, Any], symbol: str
     ) -> Optional[Notification]:
         ts = result["time_series"]
-
         last_signal = ts["signal"][-1]
         last_price = float(ts["prices"][-1])
         last_sma = float(ts["sma"][-1])
@@ -187,6 +191,36 @@ class SMAWithThresholdStrategy(BaseStrategy):
             label = "SELL"
             cooldown = self.cooldown_for_label(label)
 
+        elif last_signal == "HOLD":
+            reminder_levels = tuple(
+                float(k.strip("%"))
+                for k in self.config["cooldowns"].get("REMINDERS", {}).keys()
+            ) or (5.0, 2.5, 1.0)
+
+            buy_diffs = [(p, last_upper * (1 - p / 100)) for p in reminder_levels]
+            sell_diffs = [(p, last_lower * (1 + p / 100)) for p in reminder_levels]
+
+            for pct, limit in buy_diffs:
+                if last_price >= limit and last_price < last_upper:
+                    label = f"BUY_REMINDER_{pct:.1f}%"
+                    message = (
+                        f"{symbol} is within {pct:.1f}% of the BUY target ({last_upper:.2f}). "
+                        f"Current price: {last_price:.2f}. Monitor for potential breakout."
+                    )
+                    cooldown = self.cooldown_for_label(f"REMINDERS_{pct:.1f}%")
+                    break
+            else:
+                for pct, limit in sell_diffs:
+                    if last_price <= limit and last_price > last_lower:
+                        label = f"SELL_REMINDER_{pct:.1f}%"
+                        message = (
+                            f"{symbol} is within {pct:.1f}% of the SELL target ({last_lower:.2f}). "
+                            f"Current price: {last_price:.2f}. Consider preparing to sell."
+                        )
+                        cooldown = self.cooldown_for_label(f"REMINDERS_{pct:.1f}%")
+                        break
+                else:
+                    return None
         else:
             return None
 
