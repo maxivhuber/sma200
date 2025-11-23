@@ -8,8 +8,12 @@ services:
       - services-net
     volumes:
       - ./config/msmtprc:/etc/msmtprc:ro
+      - sma200-data:/app/data
     restart: unless-stopped
 
 networks:
   services-net:
     external: true
+
+volumes:
+  sma200-data:

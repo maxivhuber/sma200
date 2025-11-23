@@ -1,7 +1,11 @@
+import shelve
 import subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import DefaultDict, List, Optional
+
+from sma200.utils import nested_defaultdict
 
 
 class Notification:
@@ -31,11 +35,26 @@ class Notification:
 class Notifier:
     """Registers and dispatches notifications with per-label cooldown enforcement."""
 
-    def __init__(self, mailing_list: List[str]) -> None:
+    def __init__(self, config: dict) -> None:
+        self.mailing_list: List[str] = config["mailing_list"]
+
+        datadir = Path(config.get("notifications", "."))
+        datadir.mkdir(parents=True, exist_ok=True)
+
+        self.SHELVE_PATH = datadir / "notifier_state"
+        self._db = shelve.open(str(self.SHELVE_PATH), writeback=True)
+
+        if "notifications" not in self._db:
+            self._db["notifications"] = defaultdict(nested_defaultdict)
+
         self.notifications: DefaultDict[str, DefaultDict[str, List[Notification]]] = (
-            defaultdict(lambda: defaultdict(list))
+            self._db["notifications"]
         )
-        self.mailing_list = mailing_list
+
+    def _persist(self) -> None:
+        """Ensure changes are written to disk."""
+        self._db["notifications"] = self.notifications
+        self._db.sync()
 
     def register(self, notification: Notification) -> bool:
         """
@@ -50,38 +69,41 @@ class Notifier:
             notification.cooldown,
         )
 
-        # Get the bucket for this (strategy, label) pair
         label_bucket = self.notifications[strategy][label]
-
-        # Get the most recent notification with the same (strategy, label)
         last_same: Optional[Notification] = label_bucket[-1] if label_bucket else None
 
-        # Suppress delivery if within label‑specific cooldown window
         if last_same and (now - last_same.timestamp) < cooldown:
             return False
 
-        # Append new notification (keep at most the last two)
         label_bucket.append(notification)
         self.notifications[strategy][label] = label_bucket[-2:]
 
-        # Trigger delivery
+        self._persist()
         self._send(notification)
         return True
-
-    # Print-based stub for debugging:
-    # def _send(self, notification: Notification) -> None:
-    #     msg = f"[{notification.strategy}] {notification.label}: {notification.message}"
-    #     print(f"[EMAIL OUT]; TO: {self.mailing_list}\n{msg}")
 
     def _send(self, notification: Notification) -> None:
         """Send the notification via the system's `mail` command."""
         subject = f"[{notification.strategy}] {notification.label}"
         body = notification.message
         msg = body.encode("utf-8")
-
         for recipient in self.mailing_list:
             subprocess.run(
                 ["mail", "-s", subject, recipient],
                 input=msg,
                 check=True,
             )
+
+    def close(self) -> None:
+        """Cleanly close the shelve database."""
+        try:
+            self._db.close()
+        except Exception:
+            pass
+
+    def __del__(self):
+        if hasattr(self, "_db"):
+            try:
+                self._db.close()
+            except Exception:
+                pass

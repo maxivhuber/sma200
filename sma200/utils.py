@@ -1,4 +1,6 @@
+from collections import defaultdict
 from datetime import date, datetime
+from typing import DefaultDict
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -64,3 +66,7 @@ def format_analytics_payload(
         "market_open": market_open,
         "result": result,
     }
+
+
+def nested_defaultdict() -> DefaultDict[str, list]:
+    return defaultdict(list)

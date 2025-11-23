@@ -41,7 +41,7 @@ class MarketServer:
         self._ws_pools: dict[str, set[WebSocket]] = {}
 
         self.analytics = Analytics(config)
-        self.notifier = Notifier(config["mailing_list"])
+        self.notifier = Notifier(config)
 
     # WebSocket Management
     def register_websocket(self, pool_name: str, ws: WebSocket) -> None:
@@ -93,6 +93,7 @@ class MarketServer:
             return
 
         self._running = False
+        self.notifier.close()
         if self._task:
             self._task.cancel()
             try:
