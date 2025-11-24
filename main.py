@@ -59,9 +59,13 @@ async def analytics_rest(
             status_code=404, detail=f"Strategy '{strat}' not configured or loaded"
         )
 
+    if server.data is None:
+        raise HTTPException(status_code=503, detail="Server data not ready")
+
+    df = server.data.copy()
     try:
         result, _ = server.analytics.execute(
-            strat, server.data, server.symbol, streaming_update=False
+            strat, df, server.symbol, streaming_update=False
         )
     except Exception as exc:
         raise HTTPException(
@@ -73,7 +77,7 @@ async def analytics_rest(
         filtered_ts = {k: v[:-1] for k, v in ts.items() if isinstance(v, list)}
         result["time_series"] = filtered_ts
 
-    return format_analytics_payload(server.symbol, strat, result, market_is_open())
+    return format_analytics_payload(server.symbol, strat, result)
 
 
 @app.websocket("/live")

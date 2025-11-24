@@ -238,7 +238,7 @@ class MarketServer:
 
             payload = json.dumps(
                 format_analytics_payload(
-                    self.symbol, strategy, result, market_open=False
+                    self.symbol, strategy, result
                 ),
                 default=str,
             )

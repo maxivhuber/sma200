@@ -56,14 +56,13 @@ def sanitize_symbol(symbol: str) -> str:
 
 
 def format_analytics_payload(
-    symbol: str, strategy: str, result: dict, market_open: bool
+    symbol: str, strategy: str, result: dict
 ) -> dict:
     """Unified payload structure for analytics REST and WS outputs."""
     return {
         "symbol": symbol,
         "strategy": strategy,
         "timestamp": datetime.utcnow().isoformat(),
-        "market_open": market_open,
         "result": result,
     }
 

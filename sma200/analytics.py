@@ -58,7 +58,7 @@ class BaseStrategy:
         raise NotImplementedError
 
     def generate_notifications(
-        self, result: Dict[str, Any], symbol: str
+        self, result: Dict[str, Any], symbol: str, streaming_update: bool = False
     ) -> Optional[Notification]:
         raise NotImplementedError
 
@@ -72,13 +72,12 @@ class DummyStrategy(BaseStrategy):
         random_label = random.choice(["A", "B"])
         return {
             "type": "dummy_strategy",
-            "params": self.config,
             "label": random_label,
             "time_series": {"dates": [], "prices": [], "signal": []},
         }
 
     def generate_notifications(
-        self, result: Dict[str, Any], symbol: str
+        self, result: Dict[str, Any], symbol: str, streaming_update: bool = False
     ) -> Optional[Notification]:
         label = result["label"]
         message = f"Dummy strategy notification for {symbol} with label {label}"
@@ -129,43 +128,39 @@ class SMAWithThresholdStrategy(BaseStrategy):
             else:
                 signals.append("HOLD")
 
-        result = {
-            "type": "sma_with_threshold",
-            "params": self.config,
-            "time_series": {
-                "dates": dates,
-                "prices": prices,
-                "sma": sma_values,
-                "upper_band": upper_band,
-                "lower_band": lower_band,
-                "signal": signals,
-            },
-        }
         if streaming_update and len(dates) > 0:
             idx = -1
             return {
-                "type": "sma_with_threshold",
-                "params": self.config,
-                "time_series": {
-                    "date": dates[idx],
-                    "price": prices[idx],
-                    "sma": sma_values[idx],
-                    "upper_band": upper_band[idx],
-                    "lower_band": lower_band[idx],
-                    "signal": signals[idx],
-                },
+                "date": dates[idx],
+                "prices": prices[idx],
+                "sma": sma_values[idx],
+                "upper_band": upper_band[idx],
+                "lower_band": lower_band[idx],
+                "signal": signals[idx],
             }
-        return result
+
+        return {
+            "dates": dates,
+            "prices": prices,
+            "sma": sma_values,
+            "upper_band": upper_band,
+            "lower_band": lower_band,
+            "signal": signals,
+        }
 
     def generate_notifications(
-        self, result: Dict[str, Any], symbol: str
+        self, result: Dict[str, Any], symbol: str, streaming_update: bool = False
     ) -> Optional[Notification]:
-        ts = result["time_series"]
-        last_signal = ts["signal"][-1]
-        last_price = float(ts["prices"][-1])
-        last_sma = float(ts["sma"][-1])
-        last_upper = float(ts["upper_band"][-1])
-        last_lower = float(ts["lower_band"][-1])
+        def get_last(x):
+            if isinstance(x, list):
+                return x[-1]
+            return x
+
+        last_signal = get_last(result["signal"])
+        last_price = float(get_last(result["prices"]))
+        last_sma = float(get_last(result["sma"]))
+        last_upper = float(get_last(result["upper_band"]))
+        last_lower = float(get_last(result["lower_band"]))
 
         if last_signal == "BUY":
             threshold = last_upper - last_sma
@@ -196,33 +191,42 @@ class SMAWithThresholdStrategy(BaseStrategy):
                 float(k.strip("%"))
                 for k in self.config["cooldowns"].get("REMINDERS", {}).keys()
             ) or (5.0, 2.5, 1.0)
-
+            reminder_levels = tuple(sorted(reminder_levels))
             buy_diffs = [(p, last_upper * (1 - p / 100)) for p in reminder_levels]
             sell_diffs = [(p, last_lower * (1 + p / 100)) for p in reminder_levels]
+            triggered = None
 
+            # buy side
             for pct, limit in buy_diffs:
                 if last_price >= limit and last_price < last_upper:
-                    label = f"BUY_REMINDER_{pct:.1f}%"
-                    message = (
-                        f"{symbol} is within {pct:.1f}% of the BUY target ({last_upper:.2f}). "
-                        f"Current price: {last_price:.2f}. Monitor for potential breakout."
-                    )
-                    cooldown = self.cooldown_for_label(f"REMINDERS_{pct:.1f}%")
+                    triggered = ("BUY", pct)
                     break
-            else:
+
+            # sell side
+            if triggered is None:
                 for pct, limit in sell_diffs:
                     if last_price <= limit and last_price > last_lower:
-                        label = f"SELL_REMINDER_{pct:.1f}%"
-                        message = (
-                            f"{symbol} is within {pct:.1f}% of the SELL target ({last_lower:.2f}). "
-                            f"Current price: {last_price:.2f}. Consider preparing to sell."
-                        )
-                        cooldown = self.cooldown_for_label(f"REMINDERS_{pct:.1f}%")
+                        triggered = ("SELL", pct)
                         break
-                else:
-                    return None
-        else:
-            return None
+
+            if triggered is None:
+                return None
+
+            direction, pct = triggered
+            if direction == "BUY":
+                label = f"BUY_REMINDER_{pct:.1f}%"
+                message = (
+                    f"{symbol} is within {pct:.1f}% of the BUY target ({last_upper:.2f}). "
+                    f"Current price: {last_price:.2f}. Monitor for potential breakout."
+                )
+            else:
+                label = f"SELL_REMINDER_{pct:.1f}%"
+                message = (
+                    f"{symbol} is within {pct:.1f}% of the SELL target ({last_lower:.2f}). "
+                    f"Current price: {last_price:.2f}. Consider preparing to sell."
+                )
+
+            cooldown = self.cooldown_for_label(label)
 
         return Notification(
             strategy="sma_with_threshold",
@@ -265,5 +269,5 @@ class Analytics:
         """Run the given strategy by name, returning result and notification."""
         strategy = self.get(name)
         result = strategy.compute(df, symbol, streaming_update)
-        notification = strategy.generate_notifications(result, symbol)
+        notification = strategy.generate_notifications(result, symbol, streaming_update)
         return result, notification
