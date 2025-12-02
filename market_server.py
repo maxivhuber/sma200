@@ -237,9 +237,7 @@ class MarketServer:
                 continue
 
             payload = json.dumps(
-                format_analytics_payload(
-                    self.symbol, strategy, result
-                ),
+                format_analytics_payload(self.symbol, strategy, result),
                 default=str,
             )
             await self.push_update(pool_name, payload)

@@ -55,9 +55,7 @@ def sanitize_symbol(symbol: str) -> str:
     return symbol.replace("^", "")
 
 
-def format_analytics_payload(
-    symbol: str, strategy: str, result: dict
-) -> dict:
+def format_analytics_payload(symbol: str, strategy: str, result: dict) -> dict:
     """Unified payload structure for analytics REST and WS outputs."""
     return {
         "symbol": symbol,

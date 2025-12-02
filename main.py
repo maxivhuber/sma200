@@ -2,9 +2,12 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 
 from market_manager import manager
 from sma200.utils import format_analytics_payload, market_is_open
+
+origins = ["https://invest.mhuber.dev"]
 
 
 @asynccontextmanager
@@ -18,6 +21,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/history")
@@ -40,6 +50,32 @@ async def get_history(
     df.index = df.index.strftime("%Y-%m-%d")  # Format index
     df = df.reset_index()
     return df.to_dict(orient="records")
+
+
+@app.get("/symbols")
+async def get_all_symbols() -> list[str]:
+    servers = await manager.get_all_servers()
+    if not servers:
+        raise HTTPException(status_code=503, detail="No market servers available")
+
+    symbols = [server.symbol for server in servers]
+    if not symbols:
+        raise HTTPException(status_code=404, detail="No symbols found")
+
+    return symbols
+
+
+@app.get("/strategies")
+async def get_all_strategies() -> list[str]:
+    servers = await manager.get_all_servers()
+    if not servers:
+        raise HTTPException(status_code=503, detail="No market servers available")
+
+    strategies = servers[0].analytics.get_all_strategies()
+    if not strategies:
+        raise HTTPException(status_code=404, detail="No strategies found")
+
+    return strategies
 
 
 @app.get("/analytics/{strat}")

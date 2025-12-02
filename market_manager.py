@@ -28,6 +28,10 @@ class MarketManager:
         """Return the MarketServer associated with the given symbol."""
         return self._servers[symbol]
 
+    async def get_all_servers(self) -> list[MarketServer]:
+        """Return all MarketServers currently registered."""
+        return list(self._servers.values())
+
     async def stop_all(self) -> None:
         """Stop all active servers cleanly."""
         for server in self._servers.values():

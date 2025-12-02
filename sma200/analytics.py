@@ -257,6 +257,10 @@ class Analytics:
             raise KeyError(f"Strategy '{name}' not configured or loaded.")
         return self._registry[name]
 
+    def get_all_strategies(self) -> list[str]:
+        """Return all registered strategies."""
+        return list(self._registry.keys())
+
     def exists(self, name: str) -> bool:
         return name in self._registry
 
