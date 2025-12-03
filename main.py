@@ -116,7 +116,7 @@ async def analytics_rest(
     return format_analytics_payload(server.symbol, strat, result)
 
 
-@app.websocket("/live")
+@app.websocket("/ws/live")
 async def intraday_data_ws(websocket: WebSocket, symbol: str = Query(...)) -> None:
     """Provide a live data websocket stream for the requested symbol."""
     pool_name = "live"
@@ -139,7 +139,7 @@ async def intraday_data_ws(websocket: WebSocket, symbol: str = Query(...)) -> No
         server.unregister_websocket(pool_name, websocket)
 
 
-@app.websocket("/analytics/{strat}/ws")
+@app.websocket("/ws/analytics/{strat}")
 async def analytics_ws(
     websocket: WebSocket,
     strat: str,
