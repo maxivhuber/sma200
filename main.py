@@ -42,7 +42,6 @@ async def get_history(
             status_code=404,
             detail=f"Symbol '{symbol}' not configured or loaded",
         ) from exc
-
     if server.data is None:
         raise HTTPException(status_code=503, detail="Historical data not ready")
 
@@ -55,22 +54,21 @@ async def get_history(
 
 
 @app.get("/symbols")
-async def get_all_symbols() -> list[str]:
+async def get_all_symbols() -> list[dict]:
     servers = await manager.get_all_servers()
     if not servers:
         raise HTTPException(status_code=503, detail="No market servers available")
 
     name_map = config.get("symbols", {})
-    symbols = [name_map.get(server.symbol, server.symbol) for server in servers]
 
-    if not symbols:
-        raise HTTPException(status_code=404, detail="No symbols found")
-
-    return symbols
+    return [
+        {"value": server.symbol, "label": name_map.get(server.symbol, server.symbol)}
+        for server in servers
+    ]
 
 
 @app.get("/strategies")
-async def get_all_strategies() -> list[str]:
+async def get_all_strategies() -> list[dict]:
     servers = await manager.get_all_servers()
     if not servers:
         raise HTTPException(status_code=503, detail="No market servers available")
@@ -79,7 +77,10 @@ async def get_all_strategies() -> list[str]:
     if not strategies:
         raise HTTPException(status_code=404, detail="No strategies found")
 
-    return strategies
+    return [
+        {"value": internal, "label": human}
+        for internal, human in strategies
+    ]
 
 
 @app.get("/analytics/{strat}")
