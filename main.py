@@ -35,7 +35,6 @@ app.add_middleware(
 async def get_history(
     symbol: str = Query(..., description="e.g. ^GSPC"),
 ) -> list[dict[str, Any]]:
-    """Return historical market data for the given symbol as a list of records."""
     try:
         server = await manager.get_server(symbol)
     except KeyError as exc:
@@ -48,8 +47,10 @@ async def get_history(
         raise HTTPException(status_code=503, detail="Historical data not ready")
 
     df = server.data.copy()
-    df.index = df.index.strftime("%Y-%m-%d")  # Format index
+    df.index = df.index.strftime("%Y-%m-%d")
     df = df.reset_index()
+    df = df.rename(columns={"index": "Date"})
+
     return df.to_dict(orient="records")
 
 
