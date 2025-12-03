@@ -4,6 +4,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from config import config
 from market_manager import manager
 from sma200.utils import format_analytics_payload, market_is_open
 
@@ -58,7 +59,9 @@ async def get_all_symbols() -> list[str]:
     if not servers:
         raise HTTPException(status_code=503, detail="No market servers available")
 
-    symbols = [server.symbol for server in servers]
+    name_map = config.get("symbols", {})
+    symbols = [name_map.get(server.symbol, server.symbol) for server in servers]
+
     if not symbols:
         raise HTTPException(status_code=404, detail="No symbols found")
 

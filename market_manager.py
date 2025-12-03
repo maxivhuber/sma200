@@ -8,7 +8,7 @@ class MarketManager:
     """Manages initialization, retrieval, and shutdown of MarketServer instances."""
 
     def __init__(self) -> None:
-        self._symbols_to_preload: list[str] = config.get("symbols", [])
+        self._symbols_to_preload: list[str] = list(config.get("symbols", {}).keys())
         self._servers: dict[str, MarketServer] = {}
 
     async def _create_server(self, symbol: str) -> MarketServer:

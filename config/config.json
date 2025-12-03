@@ -1,10 +1,10 @@
 {
     "datadir": "./data",
     "notifications": "./data/notifications",
-    "symbols": [
-        "^GSPC",
-        "^NDX"
-    ],
+    "symbols": {
+        "^GSPC": "S&P 500",
+        "^NDX": "Nasdaq 100"
+    },
     "mailing_list": [
         "my@email.com"
     ],

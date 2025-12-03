@@ -238,39 +238,36 @@ class SMAWithThresholdStrategy(BaseStrategy):
 
 
 class Analytics:
-    """Component responsible for strategy registration and execution."""
-
     def __init__(self, config: Dict[str, Any]) -> None:
         self.config = config
-        self._registry: Dict[str, BaseStrategy] = {}
+        self._registry: Dict[str, Tuple[BaseStrategy, str]] = {}
 
-        # Register known strategy types if present in config.
         if "sma" in config:
-            self.register("sma", SMAWithThresholdStrategy(config["sma"]))
-        self.register("dummy", DummyStrategy(config.get("dummy", {})))
+            self.register(
+                "sma", SMAWithThresholdStrategy(config["sma"]), "Simple Moving Average"
+            )
 
-    def register(self, name: str, strategy: BaseStrategy) -> None:
-        self._registry[name] = strategy
+        self.register("dummy", DummyStrategy(config.get("dummy", {})), "Dummy Strategy")
+
+    def register(self, name: str, strategy: BaseStrategy, human_name: str) -> None:
+        self._registry[name] = (strategy, human_name)
 
     def get(self, name: str) -> BaseStrategy:
         if name not in self._registry:
             raise KeyError(f"Strategy '{name}' not configured or loaded.")
-        return self._registry[name]
+        return self._registry[name][0]
 
     def get_all_strategies(self) -> list[str]:
-        """Return all registered strategies."""
-        return list(self._registry.keys())
+        return [human_name for _, human_name in self._registry.values()]
 
     def exists(self, name: str) -> bool:
         return name in self._registry
 
     def names(self) -> list[str]:
+        # internal names (unchanged)
         return list(self._registry.keys())
 
-    def execute(
-        self, name: str, df: pd.DataFrame, symbol: str, streaming_update: bool = False
-    ) -> Tuple[Dict[str, Any], Optional[Notification]]:
-        """Run the given strategy by name, returning result and notification."""
+    def execute(self, name: str, df, symbol, streaming_update=False):
         strategy = self.get(name)
         result = strategy.compute(df, symbol, streaming_update)
         notification = strategy.generate_notifications(result, symbol, streaming_update)
