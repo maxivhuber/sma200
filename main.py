@@ -1,27 +1,37 @@
 from contextlib import asynccontextmanager
-from typing import Any
+from datetime import datetime
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
+import pandas as pd
+from fastapi import (Depends, FastAPI, HTTPException, Query, WebSocket,
+                     WebSocketDisconnect, status)
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-from config import config
+from config import config, logger
 from market_manager import manager
 from sma200.utils import format_analytics_payload, market_is_open
 
 origins = ["https://invest.mhuber.dev"]
 
+class SymbolResponse(BaseModel):
+    value: str
+    label: str
+
+class StrategyResponse(BaseModel):
+    value: str
+    label: str
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Manage application lifespan by initializing and stopping all servers."""
     await manager.initialize_all_servers()
     try:
         yield
     finally:
         await manager.stop_all()
 
-
 app = FastAPI(lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -30,78 +40,79 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-@app.get("/history")
-async def get_history(
-    symbol: str = Query(..., description="e.g. ^GSPC"),
-) -> list[dict[str, Any]]:
+async def get_market_server(
+    symbol: Annotated[str, Query(description="e.g. ^GSPC")]
+):
     try:
         server = await manager.get_server(symbol)
     except KeyError as exc:
         raise HTTPException(
-            status_code=404,
+            status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Symbol '{symbol}' not configured or loaded",
         ) from exc
+    
     if server.data is None:
-        raise HTTPException(status_code=503, detail="Historical data not ready")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, 
+            detail="Historical data not ready"
+        )
+    return server
 
+@app.get("/history")
+async def get_history(
+    server=Depends(get_market_server)
+) -> list[dict]:
     df = server.data.copy()
     df.index = df.index.strftime("%Y-%m-%d")
-    df = df.reset_index()
-    df = df.rename(columns={"index": "Date"})
-
+    df = df.reset_index().rename(columns={"index": "Date"})
     return df.to_dict(orient="records")
 
-
-@app.get("/symbols")
-async def get_all_symbols() -> list[dict]:
+@app.get("/symbols", response_model=list[SymbolResponse])
+async def get_all_symbols():
     servers = await manager.get_all_servers()
     if not servers:
-        raise HTTPException(status_code=503, detail="No market servers available")
-
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, 
+            detail="No market servers available"
+        )
     name_map = config.get("symbols", {})
-
     return [
-        {"value": server.symbol, "label": name_map.get(server.symbol, server.symbol)}
+        SymbolResponse(
+            value=server.symbol, 
+            label=name_map.get(server.symbol, server.symbol)
+        )
         for server in servers
     ]
 
-
-@app.get("/strategies")
-async def get_all_strategies() -> list[dict]:
+@app.get("/strategies", response_model=list[StrategyResponse])
+async def get_all_strategies():
     servers = await manager.get_all_servers()
     if not servers:
-        raise HTTPException(status_code=503, detail="No market servers available")
-
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, 
+            detail="No market servers available"
+        )
     strategies = servers[0].analytics.get_all_strategies()
     if not strategies:
-        raise HTTPException(status_code=404, detail="No strategies found")
-
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="No strategies found"
+        )
     return [
-        {"value": internal, "label": human}
+        StrategyResponse(value=internal, label=human)
         for internal, human in strategies
     ]
-
 
 @app.get("/analytics/{strat}")
 async def analytics_rest(
     strat: str,
-    symbol: str = Query(..., description="e.g. ^GSPC"),
+    server=Depends(get_market_server),
 ) -> dict:
-    try:
-        server = await manager.get_server(symbol)
-    except KeyError:
-        raise HTTPException(
-            status_code=404, detail=f"Symbol '{symbol}' not configured or loaded"
-        )
-
     if not server.analytics.exists(strat):
         raise HTTPException(
-            status_code=404, detail=f"Strategy '{strat}' not configured or loaded"
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail=f"Strategy '{strat}' not configured or loaded"
         )
-
-    if server.data is None:
-        raise HTTPException(status_code=503, detail="Server data not ready")
 
     df = server.data.copy()
     try:
@@ -110,70 +121,74 @@ async def analytics_rest(
         )
     except Exception as exc:
         raise HTTPException(
-            status_code=500, detail=f"Error running strategy '{strat}': {exc}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
+            detail=f"Error running strategy '{strat}': {exc}"
         )
 
     if market_is_open():
         ts = result.get("time_series", {})
-        filtered_ts = {k: v[:-1] for k, v in ts.items() if isinstance(v, list)}
-        result["time_series"] = filtered_ts
+        result["time_series"] = {
+            k: v[:-1] for k, v in ts.items() if isinstance(v, list)
+        }
 
+    if "dates" in result:
+        result["dates"] = [
+            datetime.fromisoformat(d).strftime("%Y-%m-%d")
+            for d in result["dates"]
+        ]
+        
     return format_analytics_payload(server.symbol, strat, result)
 
-
 @app.websocket("/ws/live")
-async def intraday_data_ws(websocket: WebSocket, symbol: str = Query(...)) -> None:
-    """Provide a live data websocket stream for the requested symbol."""
+async def intraday_data_ws(
+    websocket: WebSocket, 
+    symbol: Annotated[str, Query(description="The symbol to stream, e.g. ^GSPC")]
+) -> None:
     pool_name = "live"
-
     try:
         server = await manager.get_server(symbol)
     except KeyError:
-        await websocket.close(code=4004, reason=f"Symbol '{symbol}' not available")
+        logger.warning(f"Symbol '{symbol}' not found. Closing connection.")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=f"Symbol '{symbol}' not available")
         return
 
     await websocket.accept()
     server.register_websocket(pool_name, websocket)
-
+    
     try:
-        while True:
-            await websocket.receive()  # Keep connection alive
-    except (WebSocketDisconnect, Exception):
-        pass
+        async for _ in websocket.iter_text():
+            pass
+    except Exception as exc:
+        logger.error(f"Unexpected error in live stream: {exc}")
     finally:
         server.unregister_websocket(pool_name, websocket)
-
 
 @app.websocket("/ws/analytics/{strat}")
 async def analytics_ws(
     websocket: WebSocket,
     strat: str,
-    symbol: str = Query(..., description="e.g. ^GSPC"),
+    symbol: Annotated[str, Query(description="e.g. ^GSPC")],
 ) -> None:
-    """Provide analytics data for a given symbol and strategy via WebSocket."""
     pool_name = f"analytics-{strat}"
-
     try:
         server = await manager.get_server(symbol)
     except KeyError:
-        await websocket.close(
-            code=4004, reason=f"Symbol '{symbol}' not configured or loaded"
-        )
+        logger.warning(f"Symbol '{symbol}' not found. Closing connection.")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=f"Symbol '{symbol}' not configured")
         return
 
     if not server.analytics.exists(strat):
-        await websocket.close(
-            code=4004, reason=f"Strategy '{strat}' not configured or loaded"
-        )
+        logger.warning(f"Strategy '{strat}' not found. Closing connection.")
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=f"Strategy '{strat}' not configured")
         return
 
     await websocket.accept()
     server.register_websocket(pool_name, websocket)
 
     try:
-        while True:
-            await websocket.receive()  # Keep connection alive
-    except (WebSocketDisconnect, Exception):
-        pass
+        async for _ in websocket.iter_text():
+            pass
+    except Exception as exc:
+        logger.error(f"Unexpected WebSocket error: {exc}")
     finally:
         server.unregister_websocket(pool_name, websocket)
