@@ -113,8 +113,9 @@ async def analytics_rest(
             status_code=status.HTTP_404_NOT_FOUND, 
             detail=f"Strategy '{strat}' not configured or loaded"
         )
-
+        
     df = server.data.copy()
+    
     try:
         result, _ = server.analytics.execute(
             strat, df, server.symbol, streaming_update=False
@@ -131,12 +132,6 @@ async def analytics_rest(
             k: v[:-1] for k, v in ts.items() if isinstance(v, list)
         }
 
-    if "dates" in result:
-        result["dates"] = [
-            datetime.fromisoformat(d).strftime("%Y-%m-%d")
-            for d in result["dates"]
-        ]
-        
     return format_analytics_payload(server.symbol, strat, result)
 
 @app.websocket("/ws/live")

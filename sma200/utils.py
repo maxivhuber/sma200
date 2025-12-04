@@ -56,12 +56,21 @@ def sanitize_symbol(symbol: str) -> str:
 
 
 def format_analytics_payload(symbol: str, strategy: str, result: dict) -> dict:
-    """Unified payload structure for analytics REST and WS outputs."""
+    data = result.copy()
+    
+    if "dates" in data:
+        data["dates"] = [
+            datetime.fromisoformat(d).strftime("%Y-%m-%d") for d in data["dates"]
+        ]
+
+    if "date" in data:
+        data["date"] = datetime.fromisoformat(data["date"]).strftime("%Y-%m-%d")
+
     return {
         "symbol": symbol,
         "strategy": strategy,
         "timestamp": datetime.utcnow().isoformat(),
-        "result": result,
+        "result": data,
     }
 
 

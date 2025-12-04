@@ -132,7 +132,7 @@ class SMAWithThresholdStrategy(BaseStrategy):
             idx = -1
             return {
                 "date": dates[idx],
-                "prices": prices[idx],
+                "price": prices[idx],
                 "sma": sma_values[idx],
                 "upper_band": upper_band[idx],
                 "lower_band": lower_band[idx],
@@ -151,16 +151,16 @@ class SMAWithThresholdStrategy(BaseStrategy):
     def generate_notifications(
         self, result: Dict[str, Any], symbol: str, streaming_update: bool = False
     ) -> Optional[Notification]:
-        def get_last(x):
-            if isinstance(x, list):
-                return x[-1]
-            return x
+    
+        def get_val(*keys):
+            val = next((result[k] for k in keys if k in result), None)
+            return val[-1] if isinstance(val, list) else val
 
-        last_signal = get_last(result["signal"])
-        last_price = float(get_last(result["prices"]))
-        last_sma = float(get_last(result["sma"]))
-        last_upper = float(get_last(result["upper_band"]))
-        last_lower = float(get_last(result["lower_band"]))
+        last_signal = get_val("signal")
+        last_price = float(get_val("prices", "price"))
+        last_sma = float(get_val("sma"))
+        last_upper = float(get_val("upper_band"))
+        last_lower = float(get_val("lower_band"))
 
         if last_signal == "BUY":
             threshold = last_upper - last_sma
